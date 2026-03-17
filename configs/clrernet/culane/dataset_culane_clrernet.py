@@ -73,6 +73,7 @@ train_pipeline = [
         meta_keys=[
             "filename",
             "sub_img_name",
+            "scene_label",
             "ori_shape",
             "img_shape",
             "ori_shape",
@@ -93,6 +94,7 @@ val_pipeline = [
         meta_keys=[
             "filename",
             "sub_img_name",
+            "scene_label",
             "ori_shape",
             "img_shape",
         ],
