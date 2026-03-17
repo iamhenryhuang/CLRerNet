@@ -118,6 +118,9 @@ class CLRerNetFPN(nn.Module):
               Example of shapes:
                 ([1, 64, 40, 100], [1, 64, 20, 50], [1, 64, 10, 25]).
         """
+        # reset each iteration
+        self.sgm_p = None
+
         if isinstance(inputs, tuple):
             inputs = list(inputs)
 
