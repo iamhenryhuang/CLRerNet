@@ -69,7 +69,7 @@ class CLRerNet(SingleStageDetector):
             # fallback: derive a stable probability from first FPN output
             p_global = torch.sigmoid(x[0].mean(dim=[1, 2, 3]))
         else:
-            p_global = p.mean(dim=[1, 2, 3])
+            p_global = p.reshape(p.size(0), -1).mean(dim=1)
 
         gt_scene = self._build_scene_targets(
             img, img_metas, device=p_global.device, dtype=p_global.dtype
