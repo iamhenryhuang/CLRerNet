@@ -1,5 +1,14 @@
 model = dict(
     type="CLRerNet",
+    contrastive_loss_weight=0.1,
+    contrastive_temperature=0.1,
+    zero_dce=dict(
+        type="ZeroDCEEnhancer",
+        channels=32,
+        pretrained="checkpoints/zerodce.pth",
+        requires_grad=False,
+    ),
+    zero_dce_gamma=0.7,
     data_preprocessor=dict(
         type='DetDataPreprocessor',
         mean=[0, 0, 0],
@@ -16,6 +25,9 @@ model = dict(
         in_channels=[128, 256, 512],
         out_channels=64,
         num_outs=3,
+        projection_levels=3,
+        proj_hidden_dim=256,
+        proj_out_dim=128,
     ),
     bbox_head=dict(
         type="CLRerHead",
