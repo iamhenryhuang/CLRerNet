@@ -57,9 +57,35 @@ class SceneAwareGateModule(nn.Module):
         return f_fuse, p
 
 
+class ProjectionHead(nn.Module):
+    def __init__(self, in_channels, hidden_dim=256, out_dim=128):
+        super(ProjectionHead, self).__init__()
+        self.pool = nn.AdaptiveAvgPool2d(1)
+        self.mlp = nn.Sequential(
+            nn.Linear(in_channels, hidden_dim, bias=False),
+            nn.BatchNorm1d(hidden_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(hidden_dim, out_dim, bias=False),
+            nn.BatchNorm1d(out_dim),
+        )
+
+    def forward(self, feat):
+        x = self.pool(feat).flatten(1)
+        x = self.mlp(x)
+        return F.normalize(x, dim=1)
+
+
 @MODELS.register_module()
 class CLRerNetFPN(nn.Module):
-    def __init__(self, in_channels, out_channels, num_outs):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        num_outs,
+        projection_levels=3,
+        proj_hidden_dim=256,
+        proj_out_dim=128,
+    ):
         """
         Feature pyramid network for CLRerNet.
         Args:
@@ -106,6 +132,18 @@ class CLRerNetFPN(nn.Module):
         self.fem = FeatureEnhancementModule(self.out_channels)
         self.sgm = SceneAwareGateModule(self.out_channels)
         self.sgm_p = None  # To store probability map for loss calculation
+        self.proj_feats = None
+        self.projection_levels = int(projection_levels)
+        self.proj_heads = nn.ModuleList(
+            [
+                ProjectionHead(
+                    in_channels=self.out_channels,
+                    hidden_dim=proj_hidden_dim,
+                    out_dim=proj_out_dim,
+                )
+                for _ in range(max(self.projection_levels, 0))
+            ]
+        )
 
     def forward(self, inputs):
         """
@@ -122,6 +160,7 @@ class CLRerNetFPN(nn.Module):
         """
         # reset each iteration
         self.sgm_p = None
+        self.proj_feats = None
 
         if isinstance(inputs, tuple):
             inputs = list(inputs)
@@ -147,13 +186,31 @@ class CLRerNetFPN(nn.Module):
             )
 
         outs = [self.fpn_convs[i](laterals[i]) for i in range(used_backbone_levels)]
-        
+
         f_ori = outs[0]
         f_enh = self.fem(f_ori)
-        
+
         # Apply SGM
         f_fuse, p = self.sgm(f_ori, f_enh)
         self.sgm_p = p
-        
+
         outs[0] = f_fuse
+
+        # proj_feats are NOT computed here; call compute_proj_feats() explicitly
+        # only when contrastive learning is needed (i.e., night samples exist).
+
         return tuple(outs)
+
+    def compute_proj_feats(self, outs):
+        """Compute projection features for contrastive learning.
+
+        Should only be called when night samples are present in the batch.
+
+        Args:
+            outs: Tuple of FPN output feature maps (same object returned by forward).
+        """
+        n_proj = min(len(outs), len(self.proj_heads))
+        if n_proj > 0:
+            self.proj_feats = tuple(self.proj_heads[i](outs[i]) for i in range(n_proj))
+        else:
+            self.proj_feats = None
