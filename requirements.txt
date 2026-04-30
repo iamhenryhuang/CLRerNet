@@ -3,4 +3,5 @@ p_tqdm==1.4.2
 pytest
 pytest-cov
 tensorboard
+timm
 yapf==0.40.1
