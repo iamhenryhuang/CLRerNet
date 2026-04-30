@@ -95,43 +95,41 @@ class CLRerNet(SingleStageDetector):
         return result
 
     def _apply_lane_enhance_positive(self, batch_inputs, batch_data_samples, night_indices):
-        """Build positive samples by locally enhancing GT lane regions.
-
-        The lane mask is used only as a soft blending weight. Image processing is
-        applied to the original image, then mixed back only around GT lanes.
-        """
+        """Build positive samples by brightening GT lane pixels only."""
         if not night_indices:
             return batch_inputs
 
         x_unit, scaled = self._to_unit_range(batch_inputs)
 
-        masks = self._create_lane_mask(batch_inputs, batch_data_samples, night_indices)
-        # Expand lane support, then smooth it into a soft alpha matte to avoid
-        # hard mask artifacts becoming the contrastive shortcut.
-        lane_alpha = F.max_pool2d(masks, kernel_size=15, stride=1, padding=7)
-        lane_alpha = F.avg_pool2d(lane_alpha, kernel_size=11, stride=1, padding=5)
-        lane_alpha = lane_alpha.clamp(0.0, 1.0).to(dtype=x_unit.dtype)
+        masks = self._create_lane_mask(
+            batch_inputs,
+            batch_data_samples,
+            night_indices,
+            line_thickness=1,
+        )
+        lane_mask = masks.clamp(0.0, 1.0).to(dtype=x_unit.dtype)
 
-        if lane_alpha.sum() <= 0:
+        if lane_mask.sum() <= 0:
             return batch_inputs
 
-        # Unsharp mask plus a stronger brightness boost so GT lane pixels are
-        # visibly clearer while still avoiding synthetic neon lanes.
-        blur = F.avg_pool2d(x_unit, kernel_size=5, stride=1, padding=2)
-        sharp = x_unit + 1.2 * (x_unit - blur)
-        enhanced = (sharp + 0.18).clamp(0.0, 1.0)
-
-        positive = x_unit * (1.0 - lane_alpha) + enhanced * lane_alpha
+        positive = (x_unit + 0.48 * lane_mask).clamp(0.0, 1.0)
         return self._from_unit_range(positive, scaled).to(dtype=batch_inputs.dtype)
 
-    def _create_lane_mask(self, batch_inputs, batch_data_samples, night_indices=None):
-        """Create lane masks from GT annotations, only for night-scene images.
+    def _create_lane_mask(
+        self,
+        batch_inputs,
+        batch_data_samples,
+        night_indices=None,
+        line_thickness=8,
+    ):
+        """Create lane masks from GT annotations, only for selected images.
 
         Args:
             batch_inputs: Image tensor (N, C, H, W)
             batch_data_samples: List of data samples with GT information
             night_indices: List of batch indices that are night scenes. If None,
                            masks are built for all images.
+            line_thickness: Polyline drawing thickness in pixels.
 
         Returns:
             torch.Tensor: Lane masks (N, 1, H, W), value=1 for lane, 0 for background
@@ -172,14 +170,18 @@ class CLRerNet(SingleStageDetector):
                                 points.append([x, y])
                         if len(points) >= 2:
                             points_arr = np.array(points, dtype=np.int32)
-                            cv2.polylines(mask_np, [points_arr], False, 1, thickness=8)
+                            cv2.polylines(
+                                mask_np, [points_arr], False, 1, thickness=line_thickness
+                            )
                     elif isinstance(lane_points, torch.Tensor):
                         points_np = lane_points.cpu().numpy()
                         if points_np.ndim == 1:
                             points_np = points_np.reshape(-1, 2)
                         if points_np.ndim == 2 and points_np.shape[1] == 2:
                             points_arr = np.clip(points_np, [0, 0], [W - 1, H - 1]).astype(np.int32)
-                            cv2.polylines(mask_np, [points_arr], False, 1, thickness=8)
+                            cv2.polylines(
+                                mask_np, [points_arr], False, 1, thickness=line_thickness
+                            )
 
                 masks[b_idx, 0, :, :] = torch.from_numpy(mask_np).float()
 
